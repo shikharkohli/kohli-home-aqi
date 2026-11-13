@@ -358,6 +358,22 @@
     border-right: 1px solid var(--border);
     padding: 24px;
   }
+  .aqi-metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .aqi-metric {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid color-mix(in srgb, var(--aqi-color, var(--border)) 32%, var(--border));
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
+  }
+  .aqi-metric-label { color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: 0.055em; text-transform: uppercase; }
+  .aqi-metric-value { font-size: 30px; font-weight: 700; letter-spacing: -0.045em; line-height: 1.05; margin-top: 4px; }
+  .aqi-metric-status { color: var(--text-2); font-size: 12px; font-weight: 600; line-height: 1.25; margin-top: 5px; }
   .aqi-eyebrow, .driver-kicker {
     color: var(--muted);
     font-size: 12px;
@@ -385,6 +401,8 @@
   .aqi-context p { color: var(--text-2); font-size: 15px; line-height: 1.5; margin: 0; }
   .aqi-context .health-note { margin-top: 16px; }
   .aqi-context .health-note strong { color: var(--text); }
+  .health-impact-title { color: var(--text); font-size: 15px; font-weight: 700; margin: 16px 0 4px; }
+  .health-action { color: var(--text-2); font-size: 14px; line-height: 1.45; margin-top: 8px; }
   .aqi-method { border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; line-height: 1.45; margin-top: 16px; padding-top: 12px; }
   .driver-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .driver-card { min-height: 145px; }
@@ -517,6 +535,7 @@
     .segmented button { padding: 6px 11px; font-size: 13px; }
     .aqi-score, .aqi-context { padding: 20px; }
     .aqi-context h2 { font-size: 20px; }
+    .aqi-metrics { grid-template-columns: 1fr; }
   }
 
   @media (max-width: 680px) {
@@ -789,16 +808,46 @@ function cardHtml(label, value, unit, cat) {
   `;
 }
 
-  function healthImplication(key) {
+  function healthContext(key) {
     const messages = {
-      good: 'Long-term: this range is generally associated with lower health concern. Continue to monitor, since particle levels can change quickly.',
-      mod: 'Long-term: if this level persists, children, older adults, and people with heart or lung conditions may benefit from reducing sustained exposure.',
-      usg: 'Long-term: repeated exposure can increase respiratory and cardiovascular concern for sensitive groups, especially people with asthma or heart and lung conditions.',
-      bad: 'Long-term: sustained exposure can aggravate heart and lung disease and raises health concern for everyone. Reduce prolonged outdoor exertion when practical.',
-      vbad: 'Long-term: repeated exposure at this level increases health concern for everyone, particularly people with heart or lung conditions. Limit prolonged outdoor exposure when practical.',
-      hazard: 'Long-term: repeated exposure at this level presents serious health concern for everyone. Avoid prolonged outdoor exposure and follow local public-health guidance.',
+      good: {
+        impact: 'Particle pollution is low on these measurements. Most people can continue normal outdoor activity with minimal expected impact.',
+        action: 'Keep monitoring—local particle levels can change quickly.'
+      },
+      mod: {
+        impact: 'Most people are unlikely to be affected. People who are unusually sensitive to particle pollution may notice mild breathing discomfort during sustained outdoor exertion.',
+        action: 'If you are sensitive to pollution, ease back on prolonged or heavy outdoor activity if symptoms begin.'
+      },
+      usg: {
+        impact: 'Children, older adults, and people with asthma, COPD, heart disease, or diabetes are more likely to experience coughing, wheeze, chest tightness, or unusual breathlessness during outdoor activity. Repeated high-particle days add respiratory and cardiovascular strain.',
+        action: 'Sensitive groups should shorten or reduce prolonged outdoor exertion and watch for symptoms.'
+      },
+      bad: {
+        impact: 'Everyone may begin to feel health effects—especially irritation, coughing, or breathlessness with outdoor exertion. Effects can be more serious for people with heart or lung conditions, and persistent exposure raises concern for respiratory and cardiovascular health.',
+        action: 'Reduce prolonged or heavy outdoor activity; sensitive groups should move exercise indoors when practical.'
+      },
+      vbad: {
+        impact: 'Health alert: more serious effects are possible for everyone, not only sensitive groups. People with asthma, COPD, or heart disease face a higher risk of symptom flare-ups, and repeated exposure can substantially increase cardiorespiratory burden.',
+        action: 'Avoid prolonged outdoor activity; sensitive groups should avoid outdoor exertion and follow their care plan.'
+      },
+      hazard: {
+        impact: 'Emergency-level particle pollution: the entire population is more likely to be affected. Respiratory effects can occur even in healthy people, with particularly serious concern for people with heart or lung disease.',
+        action: 'Avoid outdoor exertion, keep time outdoors brief, and follow local public-health alerts.'
+      },
     };
-    return messages[key] || 'Health context will appear when particle readings are available.';
+    return messages[key] || { impact: 'Health context will appear when particle readings are available.', action: '' };
+  }
+
+  function indiaHealthImpact(key) {
+    const messages = {
+      good: 'Minimal impact.',
+      mod: 'Minor breathing discomfort may affect sensitive people.',
+      usg: 'Breathing discomfort may affect people with lung or heart disease, children, and older adults.',
+      bad: 'Prolonged exposure may cause breathing discomfort; heart disease can worsen discomfort.',
+      vbad: 'Prolonged exposure may cause respiratory illness, especially with heart or lung disease.',
+      hazard: 'Effects can occur even in healthy people and may be serious for heart or lung disease.',
+    };
+    return messages[key] || 'Health context unavailable.';
   }
 
   function aqiDriver(pm25, pm10) {
@@ -810,8 +859,8 @@ function cardHtml(label, value, unit, cat) {
     return { name: 'PM10', value: pm10, aqi: pm10Aqi };
   }
 
-  function driverCard(name, value, aqi, isPrimary) {
-    const category = aqi?.key ? aqi : null;
+  function driverCard(name, value, usAqi, indiaAqi, isPrimary) {
+    const category = usAqi?.key ? usAqi : null;
     const marker = isPrimary ? '<div class="driver-flag">Primary AQI driver</div>' : '';
     const badge = category ? `<span class="badge ${category.key}">${category.label}</span>` : '';
     return `
@@ -819,7 +868,7 @@ function cardHtml(label, value, unit, cat) {
         ${category ? `<div class="stripe ${category.key}"></div>` : ''}
         <div class="driver-kicker">${name}</div>
         <div class="driver-value">${value ?? '—'}<span class="driver-unit">µg/m³</span></div>
-        <div class="driver-aqi">US EPA AQI: <strong>${aqi?.aqi ?? '—'}</strong></div>
+        <div class="driver-aqi">US EPA: <strong>${usAqi?.aqi ?? '—'}</strong> · India CPCB: <strong>${indiaAqi?.aqi ?? '—'}</strong></div>
         ${badge}
         ${marker}
       </div>
@@ -845,25 +894,38 @@ function renderCards(latest) {
   const us = combineAqi(pm25, pm10, US_PM25, US_PM10);
   const india = combineAqi(pm25, pm10, IN_PM25, IN_PM10);
   const driver = aqiDriver(pm25, pm10);
+  const health = healthContext(us?.key);
   const color = us?.key ? `var(--${us.key})` : 'var(--accent)';
   aqiSummary.style.setProperty('--aqi-color', color);
   driverCards.style.setProperty('--aqi-color', color);
   aqiSummary.innerHTML = `
       <div class="aqi-score">
-        <div class="aqi-eyebrow">Current AQI · US EPA</div>
-        <div class="aqi-number">${us?.aqi ?? '—'}</div>
-        <div class="aqi-status">${us?.label ?? 'Unavailable'}</div>
-        <div class="aqi-scale">Calculated from PM2.5 and PM10</div>
+        <div class="aqi-eyebrow">Current AQI · two standards</div>
+        <div class="aqi-metrics">
+          <div class="aqi-metric">
+            <div class="aqi-metric-label">US EPA</div>
+            <div class="aqi-metric-value">${us?.aqi ?? '—'}</div>
+            <div class="aqi-metric-status">${us?.label ?? 'Unavailable'}</div>
+          </div>
+          <div class="aqi-metric">
+            <div class="aqi-metric-label">India CPCB</div>
+            <div class="aqi-metric-value">${india?.aqi ?? '—'}</div>
+            <div class="aqi-metric-status">${india?.label ?? 'Unavailable'}</div>
+          </div>
+        </div>
+        <div class="aqi-scale">Both calculated from PM2.5 and PM10</div>
       </div>
       <div class="aqi-context">
         <div class="driver-kicker">What is driving it</div>
         <h2>${driver.name} is the primary driver at ${driver.value ?? '—'} µg/m³.</h2>
-        <p class="health-note"><strong>${healthImplication(us?.key)}</strong></p>
-        <div class="aqi-method">India CPCB AQI: <strong>${india?.aqi ?? '—'}${india ? ` · ${india.label}` : ''}</strong>. This is a current, local measurement—not a personal medical assessment or an exposure forecast.</div>
+        <div class="health-impact-title">Health impact at this level</div>
+        <p class="health-note"><strong>${health.impact}</strong></p>
+        <p class="health-action"><strong>Practical step:</strong> ${health.action}</p>
+        <div class="aqi-method"><strong>India CPCB context:</strong> ${indiaHealthImpact(india?.key)} This is a current local measurement, not a personal medical assessment or exposure forecast.</div>
       </div>
   `;
-  driverCards.innerHTML = driverCard('PM2.5', pm25, subIndex(pm25, US_PM25), driver.name === 'PM2.5') +
-    driverCard('PM10', pm10, subIndex(pm10, US_PM10), driver.name === 'PM10');
+  driverCards.innerHTML = driverCard('PM2.5', pm25, subIndex(pm25, US_PM25), subIndex(pm25, IN_PM25), driver.name === 'PM2.5') +
+    driverCard('PM10', pm10, subIndex(pm10, US_PM10), subIndex(pm10, IN_PM10), driver.name === 'PM10');
   pmCards.innerHTML = `<div class="card">${cardHtml('PM1.0', pm1, 'µg/m³', pmCategory('pm1', pm1))}</div>`;
 }
 
