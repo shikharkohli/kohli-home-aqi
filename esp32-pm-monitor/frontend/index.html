@@ -342,6 +342,59 @@
   .stripe.vbad   { background: var(--vbad); }
   .stripe.hazard { background: var(--hazard); }
 
+  /* Current AQI brief — the decision-oriented view comes before raw readings */
+  .aqi-brief {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    display: grid;
+    grid-template-columns: minmax(190px, 0.72fr) minmax(0, 1.28fr);
+    overflow: hidden;
+    margin-bottom: 22px;
+  }
+  .aqi-score {
+    background: color-mix(in srgb, var(--aqi-color, var(--accent)) 13%, var(--surface));
+    border-right: 1px solid var(--border);
+    padding: 24px;
+  }
+  .aqi-eyebrow, .driver-kicker {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .aqi-number {
+    color: var(--aqi-color, var(--text));
+    font-size: clamp(64px, 11vw, 104px);
+    font-weight: 700;
+    letter-spacing: -0.07em;
+    line-height: 0.9;
+    margin: 12px 0 10px -5px;
+  }
+  .aqi-status {
+    color: var(--aqi-color, var(--text));
+    font-size: 20px;
+    font-weight: 650;
+    letter-spacing: -0.025em;
+  }
+  .aqi-scale { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .aqi-context { padding: 24px; }
+  .aqi-context h2 { margin: 5px 0 8px; font-size: 22px; line-height: 1.18; letter-spacing: -0.03em; }
+  .aqi-context p { color: var(--text-2); font-size: 15px; line-height: 1.5; margin: 0; }
+  .aqi-context .health-note { margin-top: 16px; }
+  .aqi-context .health-note strong { color: var(--text); }
+  .aqi-method { border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; line-height: 1.45; margin-top: 16px; padding-top: 12px; }
+  .driver-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .driver-card { min-height: 145px; }
+  .driver-card.primary-driver { box-shadow: 0 0 0 1px var(--aqi-color, var(--accent)), var(--shadow); }
+  .driver-value { font-size: 30px; font-weight: 650; letter-spacing: -0.035em; line-height: 1.05; margin-top: 8px; }
+  .driver-unit { color: var(--muted); font-size: 13px; font-weight: 400; margin-left: 3px; }
+  .driver-aqi { color: var(--text-2); font-size: 14px; margin-top: 10px; }
+  .driver-flag { color: var(--aqi-color, var(--accent)); font-size: 12px; font-weight: 650; margin-top: 10px; }
+  .additional-grid { grid-template-columns: minmax(160px, 0.34fr); }
+
   /* Charts */
   .chart-wrap {
     background: var(--surface);
@@ -462,7 +515,34 @@
     main { padding: 14px; }
     .toolbar { gap: 14px; }
     .segmented button { padding: 6px 11px; font-size: 13px; }
+    .aqi-score, .aqi-context { padding: 20px; }
+    .aqi-context h2 { font-size: 20px; }
   }
+
+  @media (max-width: 680px) {
+    .aqi-brief { grid-template-columns: 1fr; }
+    .aqi-score { border-bottom: 1px solid var(--border); border-right: none; }
+    .driver-grid { grid-template-columns: 1fr; }
+    .additional-grid { grid-template-columns: 1fr; }
+  }
+
+  /* Deep sleep toggle — Apple-style pill switch */
+  .ds-toggle { display: inline-flex; align-items: center; cursor: pointer; }
+  .ds-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .ds-track {
+    position: relative; width: 44px; height: 26px;
+    background: var(--surface-2); border-radius: 13px;
+    transition: background .2s;
+  }
+  .ds-toggle input:checked + .ds-track { background: var(--accent); }
+  .ds-thumb {
+    position: absolute; top: 3px; left: 3px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3);
+    transition: transform .2s;
+  }
+  .ds-toggle input:checked + .ds-track .ds-thumb { transform: translateX(18px); }
+  .ds-toggle input:disabled + .ds-track { opacity: .4; cursor: default; }
 </style>
 </head>
 <body>
@@ -503,20 +583,33 @@
         <option value="1800">30 min</option>
       </select>
     </div>
+    <div class="toolbar-group">
+      <span class="toolbar-label">Deep sleep</span>
+      <label class="ds-toggle" title="Enable ESP32 deep sleep between readings to extend sensor life">
+        <input type="checkbox" id="deepSleepCheck" />
+        <span class="ds-track"><span class="ds-thumb"></span></span>
+      </label>
+    </div>
   </div>
 
-  <h2 class="section-label">Air Quality Index</h2>
-  <div class="grid" id="aqiCards">
-    <div class="card"><div class="label">AQI (US EPA)</div><div class="value">—</div></div>
-    <div class="card"><div class="label">AQI (India CPCB)</div><div class="value">—</div></div>
-  </div>
+  <section class="aqi-brief" id="aqiSummary" aria-live="polite" aria-label="Current air quality summary">
+    <div class="aqi-score">
+      <div class="aqi-eyebrow">Current AQI</div>
+      <div class="aqi-number">—</div>
+      <div class="aqi-status">Waiting for a reading</div>
+    </div>
+    <div class="aqi-context">
+      <div class="driver-kicker">What this means</div>
+      <h2>We’ll explain the current air-quality reading here.</h2>
+      <p>Once the sensor reports data, this view will identify the particle level driving the AQI and put the result in context.</p>
+    </div>
+  </section>
 
-  <h2 class="section-label">Particulate matter</h2>
-  <div class="grid" id="pmCards">
-    <div class="card"><div class="label">PM1.0</div><div class="value">—</div></div>
-    <div class="card"><div class="label">PM2.5</div><div class="value">—</div></div>
-    <div class="card"><div class="label">PM10</div><div class="value">—</div></div>
-  </div>
+  <h2 class="section-label">Particles driving your AQI</h2>
+  <div class="grid driver-grid" id="driverCards"></div>
+
+  <h2 class="section-label">Additional particle reading</h2>
+  <div class="grid additional-grid" id="pmCards"></div>
 
   <div class="chart-wrap">
     <h2>PM concentration (µg/m³)</h2>
@@ -569,6 +662,8 @@ let currentHours = 24;
 let pmChart, cntChart;
 let serverInterval = null; // last known from server
 let pendingInterval = null;
+let serverDeepSleep = null;
+const MIN_DEEP_SLEEP_INTERVAL = 120;
 
 const $ = (id) => document.getElementById(id);
 
@@ -694,35 +789,82 @@ function cardHtml(label, value, unit, cat) {
   `;
 }
 
+  function healthImplication(key) {
+    const messages = {
+      good: 'Long-term: this range is generally associated with lower health concern. Continue to monitor, since particle levels can change quickly.',
+      mod: 'Long-term: if this level persists, children, older adults, and people with heart or lung conditions may benefit from reducing sustained exposure.',
+      usg: 'Long-term: repeated exposure can increase respiratory and cardiovascular concern for sensitive groups, especially people with asthma or heart and lung conditions.',
+      bad: 'Long-term: sustained exposure can aggravate heart and lung disease and raises health concern for everyone. Reduce prolonged outdoor exertion when practical.',
+      vbad: 'Long-term: repeated exposure at this level increases health concern for everyone, particularly people with heart or lung conditions. Limit prolonged outdoor exposure when practical.',
+      hazard: 'Long-term: repeated exposure at this level presents serious health concern for everyone. Avoid prolonged outdoor exposure and follow local public-health guidance.',
+    };
+    return messages[key] || 'Health context will appear when particle readings are available.';
+  }
+
+  function aqiDriver(pm25, pm10) {
+    const pm25Aqi = subIndex(pm25, US_PM25);
+    const pm10Aqi = subIndex(pm10, US_PM10);
+    if (!pm10Aqi || (pm25Aqi && pm25Aqi.aqi >= pm10Aqi.aqi)) {
+      return { name: 'PM2.5', value: pm25, aqi: pm25Aqi };
+    }
+    return { name: 'PM10', value: pm10, aqi: pm10Aqi };
+  }
+
+  function driverCard(name, value, aqi, isPrimary) {
+    const category = aqi?.key ? aqi : null;
+    const marker = isPrimary ? '<div class="driver-flag">Primary AQI driver</div>' : '';
+    const badge = category ? `<span class="badge ${category.key}">${category.label}</span>` : '';
+    return `
+      <div class="card driver-card ${isPrimary ? 'primary-driver' : ''}">
+        ${category ? `<div class="stripe ${category.key}"></div>` : ''}
+        <div class="driver-kicker">${name}</div>
+        <div class="driver-value">${value ?? '—'}<span class="driver-unit">µg/m³</span></div>
+        <div class="driver-aqi">US EPA AQI: <strong>${aqi?.aqi ?? '—'}</strong></div>
+        ${badge}
+        ${marker}
+      </div>
+    `;
+  }
+
 function renderCards(latest) {
   const pmCards = $('pmCards');
-  const aqiCards = $('aqiCards');
+  const aqiSummary = $('aqiSummary');
+  const driverCards = $('driverCards');
   if (!latest) {
-    pmCards.innerHTML = '<div class="empty" style="grid-column:1/-1">No readings yet. Power on the ESP32.</div>';
-    aqiCards.innerHTML = '';
+    aqiSummary.innerHTML = `
+      <div class="aqi-score"><div class="aqi-eyebrow">Current AQI</div><div class="aqi-number">—</div><div class="aqi-status">Waiting for a reading</div></div>
+      <div class="aqi-context"><div class="driver-kicker">What this means</div><h2>No air-quality reading yet</h2><p>Power on the ESP32 and wait for the sensor to complete its warm-up.</p></div>
+    `;
+    driverCards.innerHTML = '';
+    pmCards.innerHTML = '<div class="empty">No readings yet.</div>';
     return;
   }
   const pm1  = latest.pm1_0_atm;
   const pm25 = latest.pm2_5_atm;
   const pm10 = latest.pm10_atm;
-
-  const c1  = pmCategory('pm1',  pm1);
-  const c25 = pmCategory('pm25', pm25);
-  const c10 = pmCategory('pm10', pm10);
-
-  pmCards.innerHTML = `
-    <div class="card">${cardHtml('PM1.0', pm1, 'µg/m³', c1)}</div>
-    <div class="card">${cardHtml('PM2.5', pm25, 'µg/m³', c25)}</div>
-    <div class="card">${cardHtml('PM10', pm10, 'µg/m³', c10)}</div>
-  `;
-
   const us = combineAqi(pm25, pm10, US_PM25, US_PM10);
   const india = combineAqi(pm25, pm10, IN_PM25, IN_PM10);
-
-  aqiCards.innerHTML = `
-    <div class="card">${cardHtml('AQI (US EPA)', us ? us.aqi : '—', '', us)}</div>
-    <div class="card">${cardHtml('AQI (India CPCB)', india ? india.aqi : '—', '', india)}</div>
+  const driver = aqiDriver(pm25, pm10);
+  const color = us?.key ? `var(--${us.key})` : 'var(--accent)';
+  aqiSummary.style.setProperty('--aqi-color', color);
+  driverCards.style.setProperty('--aqi-color', color);
+  aqiSummary.innerHTML = `
+      <div class="aqi-score">
+        <div class="aqi-eyebrow">Current AQI · US EPA</div>
+        <div class="aqi-number">${us?.aqi ?? '—'}</div>
+        <div class="aqi-status">${us?.label ?? 'Unavailable'}</div>
+        <div class="aqi-scale">Calculated from PM2.5 and PM10</div>
+      </div>
+      <div class="aqi-context">
+        <div class="driver-kicker">What is driving it</div>
+        <h2>${driver.name} is the primary driver at ${driver.value ?? '—'} µg/m³.</h2>
+        <p class="health-note"><strong>${healthImplication(us?.key)}</strong></p>
+        <div class="aqi-method">India CPCB AQI: <strong>${india?.aqi ?? '—'}${india ? ` · ${india.label}` : ''}</strong>. This is a current, local measurement—not a personal medical assessment or an exposure forecast.</div>
+      </div>
   `;
+  driverCards.innerHTML = driverCard('PM2.5', pm25, subIndex(pm25, US_PM25), driver.name === 'PM2.5') +
+    driverCard('PM10', pm10, subIndex(pm10, US_PM10), driver.name === 'PM10');
+  pmCards.innerHTML = `<div class="card">${cardHtml('PM1.0', pm1, 'µg/m³', pmCategory('pm1', pm1))}</div>`;
 }
 
 function buildLine(label, color) {
@@ -828,6 +970,21 @@ function updateCharts(rows) {
   cntChart.update('none');
 }
 
+function syncIntervalOptions(deepSleepOn) {
+  const sel = $('intervalSelect');
+  for (const opt of sel.options) {
+    const sec = parseInt(opt.value, 10);
+    const incompatible = deepSleepOn && sec < MIN_DEEP_SLEEP_INTERVAL;
+    opt.disabled = incompatible;
+    opt.title = incompatible ? 'Requires interval ≥ 2 min when deep sleep is on' : '';
+  }
+  const cur = parseInt(sel.value, 10);
+  if (deepSleepOn && cur < MIN_DEEP_SLEEP_INTERVAL) {
+    const first = [...sel.options].find(o => !o.disabled);
+    if (first) sel.value = first.value;
+  }
+}
+
 async function fetchAll() {
   try {
     const qs = currentHours ? `?hours=${currentHours}&limit=2000` : `?limit=2000`;
@@ -839,11 +996,16 @@ async function fetchAll() {
     const rows = await dataRes.json();
     const cfg = cfgRes.ok ? await cfgRes.json() : {};
     serverInterval = cfg.interval_sec ?? null;
+    serverDeepSleep = cfg.deep_sleep_enabled ?? false;
     if (serverInterval && VALID_INTERVALS.includes(serverInterval)) {
       const sel = $('intervalSelect');
       if (parseInt(sel.value, 10) !== serverInterval && pendingInterval == null) {
         sel.value = String(serverInterval);
       }
+    }
+    if (pendingInterval == null) {
+      $('deepSleepCheck').checked = serverDeepSleep;
+      syncIntervalOptions(serverDeepSleep);
     }
     const latest = rows[0];
     renderCards(latest);
@@ -955,6 +1117,36 @@ async function putInterval(sec) {
   return true;
 }
 
+async function putDeepSleep(enabled, intervalSec = null) {
+  let creds = getCreds();
+  if (!creds) {
+    creds = await promptAuth();
+    if (!creds) return false;
+  }
+  const update = { deep_sleep_enabled: enabled };
+  if (intervalSec != null) update.interval_sec = intervalSec;
+  const send = (c) => fetch('/api/config', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': authHeader(c),
+    },
+    body: JSON.stringify(update),
+  });
+  let res = await send(creds);
+  if (res.status === 401) {
+    sessionStorage.removeItem('dashPass');
+    creds = await promptAuth();
+    if (!creds) return false;
+    res = await send(creds);
+  }
+  if (!res.ok) {
+    showToast(`Update failed (${res.status})`);
+    return false;
+  }
+  return true;
+}
+
 $('intervalSelect').addEventListener('change', (ev) => {
   const sec = parseInt(ev.target.value, 10);
   if (!VALID_INTERVALS.includes(sec)) return;
@@ -981,6 +1173,35 @@ $('confirmOk').addEventListener('click', async () => {
     fetchAll();
   } else if (serverInterval) {
     $('intervalSelect').value = String(serverInterval);
+  }
+});
+
+$('deepSleepCheck').addEventListener('change', async (ev) => {
+  const enabled = ev.target.checked;
+  const currentInterval = serverInterval ?? parseInt($('intervalSelect').value, 10);
+  const safeInterval = enabled && currentInterval < MIN_DEEP_SLEEP_INTERVAL
+    ? (VALID_INTERVALS.find(i => i >= MIN_DEEP_SLEEP_INTERVAL) ?? 900)
+    : null;
+  ev.target.checked = !enabled;
+  $('deepSleepCheck').disabled = true;
+  const ok = await putDeepSleep(enabled, safeInterval);
+  $('deepSleepCheck').disabled = false;
+  if (ok) {
+    serverDeepSleep = enabled;
+    $('deepSleepCheck').checked = enabled;
+    syncIntervalOptions(enabled);
+    if (safeInterval != null) {
+      serverInterval = safeInterval;
+      $('intervalSelect').value = String(safeInterval);
+    }
+    const label = enabled ? 'Deep sleep on — sensor life extended' : 'Deep sleep off — continuous mode';
+    showToast(label);
+    if (safeInterval != null) {
+      showToast(`Interval raised to ${fmtInterval(safeInterval)} (deep sleep minimum)`, 3500);
+    }
+    fetchAll();
+  } else {
+    $('deepSleepCheck').checked = !enabled;
   }
 });
 
