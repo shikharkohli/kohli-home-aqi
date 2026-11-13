@@ -1117,19 +1117,21 @@ async function putInterval(sec) {
   return true;
 }
 
-async function putDeepSleep(enabled) {
+async function putDeepSleep(enabled, intervalSec = null) {
   let creds = getCreds();
   if (!creds) {
     creds = await promptAuth();
     if (!creds) return false;
   }
+  const update = { deep_sleep_enabled: enabled };
+  if (intervalSec != null) update.interval_sec = intervalSec;
   const send = (c) => fetch('/api/config', {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': authHeader(c),
     },
-    body: JSON.stringify({ deep_sleep_enabled: enabled }),
+    body: JSON.stringify(update),
   });
   let res = await send(creds);
   if (res.status === 401) {
@@ -1176,22 +1178,28 @@ $('confirmOk').addEventListener('click', async () => {
 
 $('deepSleepCheck').addEventListener('change', async (ev) => {
   const enabled = ev.target.checked;
+  const currentInterval = serverInterval ?? parseInt($('intervalSelect').value, 10);
+  const safeInterval = enabled && currentInterval < MIN_DEEP_SLEEP_INTERVAL
+    ? (VALID_INTERVALS.find(i => i >= MIN_DEEP_SLEEP_INTERVAL) ?? 900)
+    : null;
   ev.target.checked = !enabled;
   $('deepSleepCheck').disabled = true;
-  const ok = await putDeepSleep(enabled);
+  const ok = await putDeepSleep(enabled, safeInterval);
   $('deepSleepCheck').disabled = false;
   if (ok) {
     serverDeepSleep = enabled;
     $('deepSleepCheck').checked = enabled;
     syncIntervalOptions(enabled);
+    if (safeInterval != null) {
+      serverInterval = safeInterval;
+      $('intervalSelect').value = String(safeInterval);
+    }
     const label = enabled ? 'Deep sleep on — sensor life extended' : 'Deep sleep off — continuous mode';
     showToast(label);
-    if (enabled && serverInterval && serverInterval < MIN_DEEP_SLEEP_INTERVAL) {
-      const safeInterval = VALID_INTERVALS.find(i => i >= MIN_DEEP_SLEEP_INTERVAL) ?? 900;
-      await putInterval(safeInterval);
+    if (safeInterval != null) {
       showToast(`Interval raised to ${fmtInterval(safeInterval)} (deep sleep minimum)`, 3500);
-      fetchAll();
     }
+    fetchAll();
   } else {
     $('deepSleepCheck').checked = !enabled;
   }

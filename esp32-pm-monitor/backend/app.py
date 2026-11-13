@@ -316,14 +316,25 @@ def get_config():
 def put_config(update: ConfigUpdate):
     if update.interval_sec is None and update.deep_sleep_enabled is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Provide interval_sec or deep_sleep_enabled")
-    if update.deep_sleep_enabled and update.interval_sec is not None and update.interval_sec < 120:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "interval_sec must be >= 120 when deep_sleep_enabled is true",
-        )
     conn = get_db()
+    cur = conn.cursor()
     try:
-        cur = conn.cursor()
+        # Validate the effective configuration, not only fields supplied in this
+        # request. Otherwise a partial update can leave deep sleep enabled with
+        # an interval too short for the sensor warm-up cycle.
+        cur.execute("SELECT key, value FROM config WHERE key IN ('interval_sec', 'deep_sleep_enabled')")
+        current = {r[0]: r[1] for r in cur.fetchall()}
+        interval_sec = update.interval_sec if update.interval_sec is not None else int(current.get("interval_sec", "30"))
+        deep_sleep_enabled = (
+            update.deep_sleep_enabled
+            if update.deep_sleep_enabled is not None
+            else current.get("deep_sleep_enabled", "0") == "1"
+        )
+        if deep_sleep_enabled and interval_sec < 120:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "interval_sec must be >= 120 when deep_sleep_enabled is true",
+            )
         if update.interval_sec is not None:
             cur.execute(
                 "INSERT INTO config (key, value) VALUES ('interval_sec', %s) "
@@ -337,8 +348,8 @@ def put_config(update: ConfigUpdate):
                 ("1" if update.deep_sleep_enabled else "0",),
             )
         conn.commit()
-        cur.close()
     finally:
+        cur.close()
         conn.close()
     return get_config()
 
