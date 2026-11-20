@@ -1,0 +1,31 @@
+#pragma once
+
+// Copy this file to config.h, then replace every placeholder before uploading.
+// config.h contains credentials and must stay private.
+
+// Your 2.4 GHz Wi-Fi network. ESP32 boards do not support 5 GHz-only networks.
+#define WIFI_SSID     "YourWiFiName"
+#define WIFI_PASSWORD "YourWiFiPassword"
+
+// Your deployed Vercel URL, without a trailing slash.
+#define SERVER_URL    "https://your-project.vercel.app"
+
+// Must exactly match the API_KEY environment variable in Vercel.
+#define API_KEY       "replace-with-a-long-random-string"
+
+// Set to 5003 or 7003 to match the label on your sensor.
+#define SENSOR_MODEL  5003
+
+// PMS sensor UART wiring: sensor TX -> ESP32 RX, sensor RX -> ESP32 TX.
+#define PMS_RX_PIN    16
+#define PMS_TX_PIN    17
+
+// Optional: connect PMS SET to GPIO 25 for dashboard-controlled deep sleep.
+// Use -1 when SET remains tied to 3.3 V and deep sleep is not wired.
+#define PMS_SET_PIN   25
+
+// 0 sends readings to the web dashboard. 1 prints readings only over USB.
+#define STANDALONE_MODE  0
+
+// Used until the dashboard supplies a different interval.
+#define DEFAULT_INTERVAL_SEC  300
