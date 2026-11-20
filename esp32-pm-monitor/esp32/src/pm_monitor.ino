@@ -86,6 +86,7 @@
   #include <WiFi.h>
   #include <HTTPClient.h>
   #include <ArduinoJson.h>   // v7 API: JsonDocument (no size template)
+  #include <esp_task_wdt.h>
 #endif
 
 // ─── Protocol ────────────────────────────────────────────────────────────────
@@ -109,6 +110,13 @@ static constexpr uint32_t CONFIG_POLL_INTERVAL_MS = 60000UL;
 // reconnect first, then explicitly rejoin the configured network.
 static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000UL;
 static constexpr uint8_t  WIFI_CONNECT_ATTEMPTS   = 3;
+// Bound a stalled TLS/HTTP operation so the loop keeps running and the
+// watchdog can reset a wedged network stack instead of leaving uploads silent.
+static constexpr uint16_t HTTP_CONNECT_TIMEOUT_MS  = 10000;
+static constexpr uint16_t HTTP_RESPONSE_TIMEOUT_MS = 15000;
+static constexpr uint8_t  MAX_CONSECUTIVE_POST_FAILURES = 5;
+// Deep-sleep mode can include two bounded connection attempts and a retry delay.
+static constexpr uint32_t LOOP_WATCHDOG_TIMEOUT_SEC = 180;
 
 // ─── Runtime state ───────────────────────────────────────────────────────────
 #if !STANDALONE_MODE
@@ -125,6 +133,7 @@ static uint32_t g_intervalSec = DEFAULT_INTERVAL_SEC;
 static uint32_t g_lastSampleMs = 0;
 #if !STANDALONE_MODE
 static uint32_t g_lastConfigMs = 0;
+static uint8_t  g_consecutivePostFailures = 0;
 #endif
 
 // ─── Parsed sensor data ───────────────────────────────────────────────────────
@@ -267,6 +276,8 @@ bool postData(const PmsData &d) {
 
     HTTPClient http;
     http.begin(String(SERVER_URL) + "/api/data");
+    http.setConnectTimeout(HTTP_CONNECT_TIMEOUT_MS);
+    http.setTimeout(HTTP_RESPONSE_TIMEOUT_MS);
     http.addHeader("Content-Type", "application/json");
     http.addHeader("X-API-Key", API_KEY);
     int code = http.POST(body);
@@ -292,6 +303,9 @@ bool postData(const PmsData &d) {
     http.end();
     Serial.printf("[HTTP] POST /api/data → %d  interval=%u s  deep_sleep=%s\n",
                   code, g_intervalSec, g_deepSleepEnabled ? "on" : "off");
+    if (code <= 0) {
+        Serial.printf("[HTTP] transport error: %s\n", http.errorToString(code).c_str());
+    }
     return (code == 200 || code == 201);
 }
 
@@ -300,6 +314,8 @@ void fetchConfig() {
 
     HTTPClient http;
     http.begin(String(SERVER_URL) + "/api/config");
+    http.setConnectTimeout(HTTP_CONNECT_TIMEOUT_MS);
+    http.setTimeout(HTTP_RESPONSE_TIMEOUT_MS);
     http.addHeader("X-API-Key", API_KEY);
     int code = http.GET();
 
@@ -323,6 +339,23 @@ void fetchConfig() {
 
     http.end();
     Serial.printf("[HTTP] GET /api/config → %d  interval=%u s\n", code, g_intervalSec);
+}
+
+static void recordPostResult(bool success) {
+    if (success) {
+        g_consecutivePostFailures = 0;
+        return;
+    }
+
+    ++g_consecutivePostFailures;
+    Serial.printf("[Recovery] consecutive upload failures: %u/%u\n",
+                  g_consecutivePostFailures, MAX_CONSECUTIVE_POST_FAILURES);
+    if (g_consecutivePostFailures >= MAX_CONSECUTIVE_POST_FAILURES) {
+        Serial.println("[Recovery] restarting ESP32 to recover network stack");
+        Serial.flush();
+        delay(100);
+        ESP.restart();
+    }
 }
 
 #endif  // !STANDALONE_MODE
@@ -370,6 +403,8 @@ void setup() {
     WiFi.mode(WIFI_STA);
     WiFi.persistent(false);  // avoid flash writes every time a router reconnect is needed
     WiFi.setAutoReconnect(true);
+    esp_task_wdt_init(LOOP_WATCHDOG_TIMEOUT_SEC, true);
+    enableLoopWDT();
     wifiConnect();
     if (!g_rtcValid) {
         fetchConfig();
@@ -414,11 +449,13 @@ void loop() {
         if (readPmsFrame(data)) {
             Serial.printf("[PMS] atm  PM1.0=%-4u  PM2.5=%-4u  PM10=%-4u  µg/m³\n",
                           data.pm1_0_atm, data.pm2_5_atm, data.pm10_atm);
-            if (!postData(data)) {
+            bool uploaded = postData(data);
+            if (!uploaded) {
                 Serial.println("[HTTP] POST failed — retry in 30 s then sleep");
                 delay(30000);
-                postData(data);
+                uploaded = postData(data);
             }
+            recordPostResult(uploaded);
         } else {
             Serial.println("[PMS] Read failed — sleeping anyway");
         }
@@ -448,7 +485,9 @@ void loop() {
                                   data.cnt_0_3um, data.cnt_0_5um, data.cnt_1_0um,
                                   data.cnt_2_5um, data.cnt_5_0um);
                 }
-                if (postData(data)) {
+                bool uploaded = postData(data);
+                recordPostResult(uploaded);
+                if (uploaded) {
                     g_lastSampleMs = millis();
                 } else {
                     Serial.println("[HTTP] POST failed — retrying in 30 s");
