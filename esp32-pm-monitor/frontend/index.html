@@ -589,8 +589,7 @@
         <button data-hours="1">1h</button>
         <button data-hours="6">6h</button>
         <button data-hours="24" class="active">24h</button>
-        <button data-hours="168">7d</button>
-        <button data-hours="">All</button>
+        <button data-hours="72">3d</button>
       </div>
     </div>
     <div class="toolbar-group">
@@ -1049,7 +1048,14 @@ function syncIntervalOptions(deepSleepOn) {
 
 async function fetchAll() {
   try {
-    const qs = currentHours ? `?hours=${currentHours}&limit=2000` : `?limit=2000`;
+    // Fetch enough records to cover the selected window at the current cadence.
+    // The backend retains at most 10,000 readings, which supports three days at
+    // the dashboard's fastest 30-second interval with room for brief outages.
+    const sampleSeconds = serverInterval && VALID_INTERVALS.includes(serverInterval)
+      ? serverInterval
+      : 30;
+    const historyLimit = Math.min(10000, Math.ceil((currentHours * 3600) / sampleSeconds) + 100);
+    const qs = `?hours=${currentHours}&limit=${historyLimit}`;
     const [dataRes, cfgRes] = await Promise.all([
       fetch('/api/data' + qs),
       fetch('/api/config'),
