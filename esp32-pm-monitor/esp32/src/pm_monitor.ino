@@ -105,6 +105,10 @@ static constexpr uint8_t  PMS_FRAME_LEN = 32;
 // PMS5003/7003 fan needs ~30 s after power-on to reach stable airflow.
 static constexpr uint32_t SENSOR_WARMUP_MS        = 30000UL;
 static constexpr uint32_t CONFIG_POLL_INTERVAL_MS = 60000UL;
+// A router reboot can leave the ESP32 associated state stale. Try a normal
+// reconnect first, then explicitly rejoin the configured network.
+static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000UL;
+static constexpr uint8_t  WIFI_CONNECT_ATTEMPTS   = 3;
 
 // ─── Runtime state ───────────────────────────────────────────────────────────
 #if !STANDALONE_MODE
@@ -206,30 +210,41 @@ bool readPmsFrame(PmsData &out, uint32_t timeoutMs = 6000) {
 // ─── WiFi / HTTP — compiled out when STANDALONE_MODE = 1 ─────────────────────
 #if !STANDALONE_MODE
 
-void wifiConnect() {
-    if (WiFi.status() == WL_CONNECTED) return;
+bool wifiConnect() {
+    if (WiFi.status() == WL_CONNECTED) return true;
 
-    Serial.printf("[WiFi] Connecting to \"%s\"", WIFI_SSID);
-    WiFi.disconnect(true);
-    delay(100);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    Serial.printf("[WiFi] Reconnecting to \"%s\"", WIFI_SSID);
+    for (uint8_t attempt = 1; attempt <= WIFI_CONNECT_ATTEMPTS; ++attempt) {
+        if (attempt == 1) {
+            // Use the credentials already held by the STA driver when possible.
+            WiFi.reconnect();
+        } else {
+            // Keep the radio enabled and retained credentials intact; turning it
+            // off during every retry made recovery after router restarts fragile.
+            WiFi.disconnect(false, false);
+            delay(250);
+            WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        }
 
-    for (uint8_t i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) {
-        delay(500);
-        Serial.print('.');
+        uint32_t deadline = millis() + WIFI_CONNECT_TIMEOUT_MS;
+        while (WiFi.status() != WL_CONNECTED &&
+               (int32_t)(deadline - millis()) > 0) {
+            delay(500);
+            Serial.print('.');
+        }
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.printf("\n[WiFi] Connected  IP=%s\n", WiFi.localIP().toString().c_str());
+            return true;
+        }
+        Serial.printf(" [attempt %u/%u failed]", attempt, WIFI_CONNECT_ATTEMPTS);
     }
 
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.printf("\n[WiFi] Connected  IP=%s\n", WiFi.localIP().toString().c_str());
-    } else {
-        WiFi.disconnect(true);
-        Serial.println("\n[WiFi] Failed — will retry next cycle");
-    }
+    Serial.println("\n[WiFi] Reconnect failed — will retry on the next sample");
+    return false;
 }
 
 bool postData(const PmsData &d) {
-    wifiConnect();
-    if (WiFi.status() != WL_CONNECTED) return false;
+    if (!wifiConnect()) return false;
 
     // ArduinoJson v7: JsonDocument (replaces StaticJsonDocument / DynamicJsonDocument)
     JsonDocument doc;
@@ -281,8 +296,7 @@ bool postData(const PmsData &d) {
 }
 
 void fetchConfig() {
-    wifiConnect();
-    if (WiFi.status() != WL_CONNECTED) return;
+    if (!wifiConnect()) return;
 
     HTTPClient http;
     http.begin(String(SERVER_URL) + "/api/config");
@@ -354,6 +368,8 @@ void setup() {
                   (unsigned long)g_intervalSec);
 #else
     WiFi.mode(WIFI_STA);
+    WiFi.persistent(false);  // avoid flash writes every time a router reconnect is needed
+    WiFi.setAutoReconnect(true);
     wifiConnect();
     if (!g_rtcValid) {
         fetchConfig();
